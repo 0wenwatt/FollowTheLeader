@@ -1,0 +1,196 @@
+#include <PID_v1.h>
+#define trigPin 4
+#define echoPin 5
+#define LWIEL 10
+#define RWIEL 11
+
+
+
+#define REVERSESPEEDL 1600
+#define REVERSESPEEDR 1400
+#define SLOWREVERSESPEEDL 1525
+#define SLOWREVERSESPEEDR 1475
+
+
+
+int LeftWheelValue = 1400;
+int RightWheelValue = 1600;
+
+const uint16_t t1_load = 0;
+const uint16_t t1_comp = 40000;
+
+double setPoint = 15; //Desired distance in cm 
+int hardReverse = 8;
+double distance; // Input for PID
+double PIDOutput;
+double filteredOutput;
+double Kp = 20;
+double Ki = 15;
+double Kd = 5;
+
+const int numReadings = 50;
+
+int readings[numReadings];      // the readings from the analog input
+int readIndex = 0;              // the index of the current reading
+int total = 0;                  // the running total
+double average = 0;                // the average of distance sensor
+
+
+
+PID myPID(&average, &PIDOutput, &setPoint, Kp, Ki, Kd, DIRECT);
+
+void setup(){
+  pinMode(LWIEL, OUTPUT);
+  pinMode(RWIEL, OUTPUT);
+  pinMode(trigPin, OUTPUT);
+  pinMode(echoPin, INPUT);
+  initAverage();
+  initInterrupt();
+  Serial.begin(9600);
+  myPID.SetMode(AUTOMATIC); //turn on PID
+  myPID.SetTunings(Kp,Ki,Kd);//set gain
+
+
+}
+
+void loop() 
+{
+ Reverse();
+ getAverage();
+
+  
+}
+
+
+void Reverse(){
+if (average < hardReverse){
+ LeftWheelValue = REVERSESPEEDL;
+  RightWheelValue = REVERSESPEEDR;
+}else if (average < setPoint){
+   LeftWheelValue = SLOWREVERSESPEEDL;
+  RightWheelValue = SLOWREVERSESPEEDR;
+  }
+
+else
+PIDController();
+}
+
+void PIDController(){
+ 
+  myPID.Compute();
+  filteredOutput = map(PIDOutput, 0, 255, 0, 100);
+  PID2Servo();
+
+ 
+ 
+  Serial.println(filteredOutput);
+  //Serial.println(setPoint);
+
+    }
+  
+  
+void PID2Servo(){
+  
+  LeftWheelValue = 1400+filteredOutput;
+  //Serial.println( LeftWheelValue);
+  RightWheelValue = 1600-filteredOutput;
+  //Serial.println(RightWheelValue);
+ 
+}
+
+
+void aansturenServo(int servopin,  float input)
+{  
+  digitalWrite(servopin, HIGH);
+  delayMicroseconds(input);
+  digitalWrite(servopin, LOW);
+
+}
+
+int getDistance(){  
+  //Making sure there is nothing on the trigpin
+  digitalWrite(trigPin, LOW);
+  delayMicroseconds(2);
+
+  //Setting the signal on the trigger pin to HIGH for 10 microseconds
+  digitalWrite(trigPin, HIGH);
+  delayMicroseconds(10);
+  digitalWrite(trigPin, LOW);
+
+  //Reading the incoming pulse from the echopin
+  long duration = pulseIn(echoPin, HIGH);
+
+  //Calculating the distance
+  int distance = duration*0.034/2;
+  if (distance > 100){
+    distance = 100;
+    return 0;
+    }
+   //  Serial.println(distance);
+  return distance;
+    
+
+}
+
+void initInterrupt(){
+  TCCR1A = 0;
+
+  TCCR1B |= ~(1 << CS12);
+  TCCR1B &= (1 << CS11);
+  TCCR1B &= ~(1 << CS10);
+
+  TCNT1 = t1_load;
+  OCR1A = t1_comp;
+
+  TIMSK1 = (1 << OCIE1A);
+
+  sei();
+}
+
+
+void initAverage(){
+  // initialize all the readings to 0:
+  for (int thisReading = 0; thisReading < numReadings; thisReading++) {
+    readings[thisReading] = 0;
+  }
+  
+}
+
+void getAverage(){
+  // subtract the last reading:
+  total = total - readings[readIndex];
+  // read from the sensor:
+  readings[readIndex] = distance;
+  // add the reading to the total:
+  total = total + readings[readIndex];
+  // advance to the next position in the array:
+  readIndex = readIndex + 1;
+
+  // if we're at the end of the array...
+  if (readIndex >= numReadings) {
+    // ...wrap around to the beginning:
+    readIndex = 0;
+  }
+
+  // calculate the average:
+  average = total / numReadings;
+  // send it to the computer as ASCII digits
+  //Serial.println(average);
+  delay(2);
+  
+  }
+
+
+
+
+
+//Deze functie word geactiveerd door de interrupt, verander de 1 naar 0 voor timer0 and 2 voor timer2
+ISR(TIMER1_COMPA_vect)
+{  
+  TCNT1 = t1_load;
+    
+    aansturenServo(LWIEL, LeftWheelValue);
+    aansturenServo(RWIEL, RightWheelValue);
+    distance = getDistance();
+ 
+}
